@@ -64,14 +64,19 @@ app.post("/api/api", async (req, res) => {
   let xq
 
   if(retryQuery !== undefined){
-    const queryEmbedding = await openai.embeddings.create({
-      model: EMBEDDING_MODEL,
-      input: retryQuery[retryQuery.length-1].content,
-    });
-
-    xq = queryEmbedding.data[0].embedding;
+    try {
+      const queryEmbedding = await openai.embeddings.create({
+        model: EMBEDDING_MODEL,
+        input: retryQuery[retryQuery.length-1].content,
+      });
   
-    console.log("embedding: " + xq);
+      xq = queryEmbedding.data[0].embedding;
+    
+      console.log("embedding: " + xq);     
+    } catch (error) {
+      console.log(error)
+    }
+
   }else{
     if (query.trim().length === 0) {
       console.error("Please enter a question");
@@ -79,15 +84,21 @@ app.post("/api/api", async (req, res) => {
       return;
     }
 
-    const queryEmbedding = await openai.embeddings.create({
-      model: EMBEDDING_MODEL,
-      input: query,
-    });
-    console.log("openai point:", query);
-  
-    xq = queryEmbedding.data[0].embedding;
-  
-    console.log("embedding: " + xq);
+    try{
+      console.log("It got here: "+ query)
+
+      const queryEmbedding = await openai.embeddings.create({
+        model: EMBEDDING_MODEL,
+        input: query,
+      });
+      console.log("openai point:", query);
+    
+      xq = queryEmbedding.data[0].embedding;
+    
+      console.log("embedding: " + xq);
+    }catch(err){
+      console.log(err)
+    }
   }
   
 
@@ -127,14 +138,13 @@ app.post("/api/api", async (req, res) => {
   }
 
   const getChatHistory = async () => {
-    try{
       const condition = { column_value: userId }; // Replace with your own condition
 
-      function delay(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-      }
+      // function delay(ms) {
+      //   return new Promise(resolve => setTimeout(resolve, ms));
+      // }
   
-      const data = await delay(5000).then(async () => {
+      // const data = await delay(5000).then(async () => {
         try {
           const { data, error } = await supabase
           .from('chats')
@@ -148,20 +158,12 @@ app.post("/api/api", async (req, res) => {
           return data[0].chats;
         }
         } catch (err) {
-         console.log(err) 
-         const history = await getChatHistory()
-          if(history.length % 2 !== 0 && history.length !== 0 && history[history.length-1].role === "user"){
-            deleteLastQuestion()
-          }
+         console.log(err)
         }
-      });
+      // });
     
       return data;
-    }catch(err){
-      console.log(err)
-    }    
-  }
-
+      }
   const createUser = async (finalPrompt) => {
     try{
       const { data, error } = await supabase
@@ -263,13 +265,13 @@ app.post("/api/api", async (req, res) => {
         const history = await getChatHistory()
 
           if(history[history.length-1].role === "assistant"){
-            upsertUser(finalPrompt)
+            await upsertUser(finalPrompt)
           }
           else{
             res.json(400).send("There was an error sending your query")
           }
       } else {
-        createUser(finalPrompt)
+        await createUser(finalPrompt)
       }
     }catch(err){
       console.log(err)
@@ -278,20 +280,31 @@ app.post("/api/api", async (req, res) => {
   }
 
   const processAnswers = async () => {
-    try {
-      function delay(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-      }
+    // try {
+    //   function delay(ms) {
+    //     return new Promise(resolve => setTimeout(resolve, ms));
+    //   }
   
-        const result = delay(7000).then(async () => {
+    //     const result = delay(7000).then(async () => {
         try {
           const history = await getChatHistory()
           console.log("This is the history: " + history)
           console.log("This is the history: " + JSON.stringify(history))
+
+          // Define the number of elements to log (e.g., 20)
+          const elementsToRemember = 21;
+
+          // Use a conditional statement to slice the array
+          const lastElements = history.length > elementsToRemember
+            ? history.slice(-elementsToRemember)
+            : history;
+
+          // Log the last elements
+          console.log("These are the last elements" + lastElements);
     
           
             const chatCompletion = await openai.chat.completions.create({
-              messages: history,
+              messages: lastElements,
               model: 'gpt-3.5-turbo',
               max_tokens: 2048,
             });
@@ -302,9 +315,10 @@ app.post("/api/api", async (req, res) => {
             const chatResponse = chatCompletion.choices[0].message.content
 
             if(history[history.length-1].role === "user"){
-              upsertAssistant(chatResponse)
+              await upsertAssistant(chatResponse)
             }
             else{
+              console.log("This was the error")
               res.json(400).send("There was an error sending your query")
             }
             
@@ -318,20 +332,17 @@ app.post("/api/api", async (req, res) => {
             return result  
         } catch (err) {
           console.log(err)
-          const history = await getChatHistory()
-          if(history.length % 2 !== 0 && history.length !== 0 && history[history.length-1].role === "user"){
-            deleteLastQuestion()
-          }
+          res.json(400).send("There was an error sending your query: " + err)
         }
-      })
-      return result
-    } catch (err) {
-      console.log(err)
-      const history = await getChatHistory()
-      if(history.length % 2 !== 0 && history.length !== 0 && history[history.length-1].role === "user"){
-        deleteLastQuestion()
-      }
-    }    
+      // })
+      // return result
+    // } catch (err) {
+    //   console.log(err)
+    //   const history = await getChatHistory()
+    //   if(history.length % 2 !== 0 && history.length !== 0 && history[history.length-1].role === "user"){
+    //     deleteLastQuestion()
+    //   }
+    // }    
   }
 
   function calculateDotProductSimilarity(vector1, vector2) {
@@ -392,17 +403,13 @@ app.post("/api/api", async (req, res) => {
             `;
   
         try {
-              checkIfRowExists(finalPrompt)
+             await checkIfRowExists(finalPrompt)
           const result = await processAnswers()
           
           console.log("Funny how this will work: " + JSON.stringify(result));
   
           res.status(200).json(result);
         } catch (error) {
-          const history = await getChatHistory()
-          if(history.length % 2 !== 0 && history.length !== 0 && history[history.length-1].role === "user"){
-            deleteLastQuestion()
-          }
           if (error.response) {
             console.error(error.response.status, error.response.data);
             res.status(error.response.status).json(error.response.data);
@@ -421,10 +428,6 @@ app.post("/api/api", async (req, res) => {
   
           res.status(200).json(result);
         } catch (error) {
-          const history = await getChatHistory()
-          if(history.length % 2 !== 0 && history.length !== 0 && history[history.length-1].role === "user"){
-            deleteLastQuestion()
-          }
           if (error.response) {
             console.error(error.response.status, error.response.data);
             res.status(error.response.status).json(error.response.data);
@@ -441,16 +444,11 @@ app.post("/api/api", async (req, res) => {
         console.log("No similarity scores found.");
         try {
           if(retryQuery === undefined){
-            checkIfRowExists(query)
+            await checkIfRowExists(query)
           }
           const result = await processAnswers()
           res.status(200).json(result);
         } catch (error) {
-          const history = await getChatHistory()
-          if(history.length % 2 !== 0 && history.length !== 0 && history[history.length-1].role === "user"){
-            deleteLastQuestion()
-          }
-
           if (error.response) {
             console.error(error.response.status, error.response.data);
             res.status(error.response.status).json(error.response.data);
@@ -464,10 +462,6 @@ app.post("/api/api", async (req, res) => {
       }
     } catch (err) {
       console.log(err)
-      const history = await getChatHistory()
-      if(history.length % 2 !== 0 && history.length !== 0 && history[history.length-1].role === "user"){
-        deleteLastQuestion()
-      }
     }    
   }
 
